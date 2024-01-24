@@ -8,7 +8,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.myapplication"
-        minSdk = 21
+        minSdk = 23
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -32,6 +32,21 @@ android {
 }
 
 dependencies {
+
+    // CameraX core library using the camera2 implementation
+    val cameraxVersion = "1.2.2"
+    // The following line is optional, as the core library is included indirectly by camera-camera2
+    //noinspection GradleDependency
+    implementation("androidx.camera:camera-core:${cameraxVersion}")
+    //noinspection GradleDependency
+    implementation("androidx.camera:camera-camera2:${cameraxVersion}")
+    // If you want to additionally use the CameraX Lifecycle library
+    //noinspection GradleDependency
+    implementation("androidx.camera:camera-lifecycle:${cameraxVersion}")
+    // If you want to additionally use the CameraX View class
+    //noinspection GradleDependency
+    implementation("androidx.camera:camera-view:${cameraxVersion}")
+
 
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
