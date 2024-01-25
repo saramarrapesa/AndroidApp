@@ -54,7 +54,7 @@ public class MainActivity extends AppCompatActivity {
     private Interpreter tflite;
     private ByteBuffer inputImageBuffer;
     private static  final String WORD_MAP = "WORD_MAP.txt";
-    private final int VOCAB_SIZE = 112216;
+    private final int VOCAB_SIZE = 5000;
     private Map<Integer, String> indexToWordMap;
 
     @Override
@@ -130,7 +130,7 @@ public class MainActivity extends AppCompatActivity {
         preprocessImage(bitmap);
 
         // Effettua l'inferenza
-        float[][] outputScores = new float[1][VOCAB_SIZE]; // Sostituisci con la dimensione corretta del tuo vocabolario
+        float[][][] outputScores = new float[1][1][VOCAB_SIZE]; // qui è il problema
         tflite.run(inputImageBuffer, outputScores);
 
         // Post-processa i risultati e genera la caption
@@ -158,12 +158,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // Post-processa i risultati e genera la caption
-    private String postprocessResults(float[][] outputScores) {
+    private String postprocessResults(float[][][] outputScores) {
         // Sostituisci con la tua logica di post-elaborazione
         // Esempio: restituisci la parola corrispondente al punteggio massimo
         int maxIndex = 0;
         for (int i = 1; i < VOCAB_SIZE; i++) {
-            if (outputScores[0][i] > outputScores[0][maxIndex]) {
+            if (outputScores[0][0][i] > outputScores[0][0][maxIndex]) {
                 maxIndex = i;
             }
         }
