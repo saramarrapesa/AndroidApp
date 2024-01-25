@@ -29,10 +29,21 @@ android {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
+    buildFeatures {
+        mlModelBinding = true
+    }
+
+    androidResources {
+        noCompress += setOf("tflite")  // Replace with your actual model file extension
+    }
 }
 
 dependencies {
 
+    implementation("org.tensorflow:tensorflow-lite:+")
+    implementation("org.tensorflow:tensorflow-lite-support:0.1.0")
+    implementation("org.tensorflow:tensorflow-lite-metadata:0.1.0")
+    implementation("org.tensorflow:tensorflow-lite-gpu:2.3.0")
     // CameraX core library using the camera2 implementation
     val cameraxVersion = "1.2.2"
     // The following line is optional, as the core library is included indirectly by camera-camera2

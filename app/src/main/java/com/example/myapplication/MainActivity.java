@@ -10,22 +10,46 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.media.ThumbnailUtils;
 import android.os.Bundle;
 import android.provider.MediaStore;
 import android.widget.Button;
 import android.widget.ImageView;
-import android.widget.ProgressBar;
 import android.widget.TextView;
+import org.tensorflow.lite.Interpreter;
+
+import java.io.BufferedReader;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.HashMap;
+import java.util.Map;
+
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final int IMAGE_SIZE = 224 ;
     TextView caption;
     ImageView imageView;
     Button picture;
     Button analyze;
     int imageSize = 224;
+
+    //name of the model stored in Asset
+    private static  final String MODEL_PATH = "model.tflite";
+    //Instantiate the Interpreter
+    private Interpreter tflite;
+    private ByteBuffer inputImageBuffer;
+    private static  final String WORD_MAP = "WORD_MAP.txt";
+    private final int VOCAB_SIZE = 112216;
+    private Map<Integer, String> indexToWordMap;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,6 +60,20 @@ public class MainActivity extends AppCompatActivity {
         imageView = findViewById(R.id.imageView);
         picture = findViewById(R.id.button);
         analyze = findViewById(R.id.buttonAnalyze);
+
+        try {
+            tflite = new Interpreter(loadModelFile());
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        // Carica la mappatura tra indici e parole dal file di testo
+        indexToWordMap = loadIndexToWordMap(WORD_MAP);
+
+        // Inizializza il buffer di input per l'immagine
+        int imageSize = 224; // Sostituisci con le dimensioni corrette del tuo modello
+        inputImageBuffer = ByteBuffer.allocateDirect(4 * imageSize * imageSize * 3);
+        inputImageBuffer.order(ByteOrder.nativeOrder());
 
         picture.setOnClickListener(view -> {
             // Launch camera if we have permission
@@ -49,47 +87,103 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    // Carica il file del modello TensorFlow Lite dal tuo asset
+    private MappedByteBuffer loadModelFile() throws IOException {
+        AssetFileDescriptor fileDescriptor = getAssets().openFd(MODEL_PATH);
+        FileInputStream inputStream = new FileInputStream(fileDescriptor.getFileDescriptor());
+        FileChannel fileChannel = inputStream.getChannel();
+        long startOffset = fileDescriptor.getStartOffset();
+        long declaredLength = fileDescriptor.getDeclaredLength();
+        return fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
+    }
 
-
-    /*public void captioning(Bitmap image) throws IOException {
+    // Carica la mappatura tra indici e parole da un file di testo
+    private Map<Integer, String> loadIndexToWordMap(String fileName) {
+        Map<Integer, String> map = new HashMap<>();
         try {
-        Model1 model = Model1.newInstance(getApplicationContext());
+            InputStream is = getAssets().open(fileName);
+            BufferedReader reader = new BufferedReader(new InputStreamReader(is));
 
-        //creates inputs for reference
-        TensorBuffer inputFeature0 = TensorBuffer.createFixedSize(new int[]{1, 7, 7, 576}, DataType.FLOAT32);
-        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(4 * imageSize * imageSize * 3);
-        byteBuffer.order(ByteOrder.nativeOrder());
+            String line;
+            int index = 0;
+            while ((line = reader.readLine()) != null) {
+                map.put(index, line.trim());
+                index++;
+            }
 
-        //?
-        TensorBuffer inputFeature1 = TensorBuffer.createFixedSize(new int[]{1, 1}, DataType.INT64);
-        inputFeature1.loadBuffer(byteBuffer);
+            reader.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return map;
+    }
 
-        int[] intValues = new int[224 * 224];
-        image.getPixels(intValues, 0, image.getWidth(),0,0,image.getWidth(), image.getHeight());
+    // Esegui inferenza sull'immagine
+    private String runInference(Bitmap bitmap) {
+        // Preprocessa l'immagine e carica i dati nel buffer di input
+        preprocessImage(bitmap);
 
-        //iterate over pixels
-        int pixel = 0;
-        for(int i = 0; i < imageSize; i++){
-            for(int j = 0; j < imageSize; j++){
-                int val = intValues[pixel++]; // RGB
-                byteBuffer.putFloat(((val >> 16) & 0xFF) * (1.f / 255.f));
-                byteBuffer.putFloat(((val >> 8) & 0xFF) * (1.f / 255.f));
-                byteBuffer.putFloat((val & 0xFF) * (1.f / 255.f));
+        // Effettua l'inferenza
+        float[][] outputScores = new float[1][VOCAB_SIZE]; // Sostituisci con la dimensione corretta del tuo vocabolario
+        tflite.run(inputImageBuffer, outputScores);
+
+        // Post-processa i risultati e genera la caption
+        String caption = postprocessResults(outputScores);
+
+        return caption;
+    }
+
+    // Preprocessa l'immagine e carica i dati nel buffer di input
+    private void preprocessImage(Bitmap bitmap) {
+        // Sostituisci con la tua logica di preelaborazione dell'immagine
+        // Assicurati di adattare questa logica alle esigenze specifiche del tuo modello
+        bitmap = Bitmap.createScaledBitmap(bitmap, IMAGE_SIZE, IMAGE_SIZE, true);
+
+        int[] intValues = new int[IMAGE_SIZE * IMAGE_SIZE];
+        float[] floatValues = new float[IMAGE_SIZE * IMAGE_SIZE * 3];
+
+        bitmap.getPixels(intValues, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
+
+        for (int i = 0; i < intValues.length; ++i) {
+            final int val = intValues[i];
+            floatValues[i * 3] = ((float)((val >> 16) & 0xFF))/255;//R
+            floatValues[i * 3 + 1] = ((float)((val >> 8) & 0xFF))/255;//G
+            floatValues[i * 3 + 2] = ((float)((val & 0xFF)))/255;//B
+        }
+    }
+
+    // Post-processa i risultati e genera la caption
+    private String postprocessResults(float[][] outputScores) {
+        // Sostituisci con la tua logica di post-elaborazione
+        // Esempio: restituisci la parola corrispondente al punteggio massimo
+        int maxIndex = 0;
+        for (int i = 1; i < VOCAB_SIZE; i++) {
+            if (outputScores[0][i] > outputScores[0][maxIndex]) {
+                maxIndex = i;
             }
         }
-        inputFeature0.loadBuffer(byteBuffer);
+        return "Caption generata: " + getIndexToWord(maxIndex); // Sostituisci con la tua mappatura
+    }
 
-        //qui si blocca l'app
-        Model1.Outputs outputs = model.process(inputFeature0, inputFeature1);
-        TensorBuffer outputFeature0 = outputs.getOutputFeature0AsTensorBuffer();
+    // Mappa l'indice al termine corrispondente nel tuo vocabolario
+    private String getIndexToWord(int index) {
+        if (indexToWordMap.containsKey(index)) {
+            return indexToWordMap.get(index);
+        } else {
+            return "Parola sconosciuta";
+        }
+    }
 
-        model.close();
-
-        } catch (IOException e) {
-        // TODO Handle the exception
-           }
-
-    }*/
+    // Chiamato quando hai un'immagine da processare
+    private void processImage(Bitmap imageBitmap) {
+        String caption = runInference(imageBitmap);
+        updateUIWithCaption(caption);
+    }
+    // Aggiorna l'interfaccia utente con la caption generata
+    private void updateUIWithCaption(String caption) {
+        TextView captionTextView = findViewById(R.id.result);
+        captionTextView.setText(caption);
+    }
 
     private final ActivityResultLauncher<Intent> someActivityResultLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -106,12 +200,7 @@ public class MainActivity extends AppCompatActivity {
                         image = Bitmap.createScaledBitmap(image, imageSize, imageSize, false);
                         Bitmap finalImage = image;
                         analyze.setOnClickListener(v -> {
-                           /* try {
-                                caption.setText(captioning(finalImage));
-                            } catch (IOException e) {
-                                throw new RuntimeException(e);
-                            }*/
-
+                            processImage(finalImage);
                         });
                     }
                 }
