@@ -18,7 +18,13 @@ import android.provider.MediaStore;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
+
+import org.tensorflow.lite.DataType;
 import org.tensorflow.lite.Interpreter;
+import org.tensorflow.lite.support.common.ops.NormalizeOp;
+import org.tensorflow.lite.support.image.ImageProcessor;
+import org.tensorflow.lite.support.image.TensorImage;
+import org.tensorflow.lite.support.image.ops.ResizeOp;
 
 import java.io.BufferedReader;
 import java.io.FileInputStream;
@@ -71,8 +77,8 @@ public class MainActivity extends AppCompatActivity {
         indexToWordMap = loadIndexToWordMap(WORD_MAP);
 
         // Inizializza il buffer di input per l'immagine
-        int imageSize = 224; // Sostituisci con le dimensioni corrette del tuo modello
-        inputImageBuffer = ByteBuffer.allocateDirect(4 * imageSize * imageSize * 3);
+        //l' input è un tensor [1 , 7 , 7 , 576] quindi devo creare un image buffer di quelle dimensioni
+        inputImageBuffer = ByteBuffer.allocateDirect(4 * 7 * 7 * 576);
         inputImageBuffer.order(ByteOrder.nativeOrder());
 
         picture.setOnClickListener(view -> {
@@ -135,21 +141,20 @@ public class MainActivity extends AppCompatActivity {
 
     // Preprocessa l'immagine e carica i dati nel buffer di input
     private void preprocessImage(Bitmap bitmap) {
-        // Sostituisci con la tua logica di preelaborazione dell'immagine
-        // Assicurati di adattare questa logica alle esigenze specifiche del tuo modello
-        bitmap = Bitmap.createScaledBitmap(bitmap, IMAGE_SIZE, IMAGE_SIZE, true);
+        ImageProcessor imageProcessor =
+                new ImageProcessor.Builder()
+                        .add(new ResizeOp(224, 224, ResizeOp.ResizeMethod.BILINEAR))
+                        .add(new NormalizeOp(0f,255f))
+                        .build();
 
-        int[] intValues = new int[IMAGE_SIZE * IMAGE_SIZE];
-        float[] floatValues = new float[IMAGE_SIZE * IMAGE_SIZE * 3];
+    // Create a TensorImage object. This creates the tensor of the corresponding
+    // tensor type (uint8 in this case) that the TensorFlow Lite interpreter needs.
+        TensorImage tensorImage = new TensorImage(DataType.FLOAT32);
 
-        bitmap.getPixels(intValues, 0, IMAGE_SIZE, 0, 0, IMAGE_SIZE, IMAGE_SIZE);
-
-        for (int i = 0; i < intValues.length; ++i) {
-            final int val = intValues[i];
-            floatValues[i * 3] = ((float)((val >> 16) & 0xFF))/255;//R
-            floatValues[i * 3 + 1] = ((float)((val >> 8) & 0xFF))/255;//G
-            floatValues[i * 3 + 2] = ((float)((val & 0xFF)))/255;//B
-        }
+    // Analysis code for every frame
+    // Preprocess the image
+        tensorImage.load(bitmap);
+        tensorImage = imageProcessor.process(tensorImage);
     }
 
     // Post-processa i risultati e genera la caption

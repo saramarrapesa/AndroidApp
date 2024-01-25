@@ -41,6 +41,7 @@ android {
 dependencies {
 
     implementation("org.tensorflow:tensorflow-lite:+")
+    implementation ("org.tensorflow:tensorflow-lite-select-tf-ops:+")
     implementation("org.tensorflow:tensorflow-lite-support:0.1.0")
     implementation("org.tensorflow:tensorflow-lite-metadata:0.1.0")
     implementation("org.tensorflow:tensorflow-lite-gpu:2.3.0")
