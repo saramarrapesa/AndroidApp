@@ -12,8 +12,20 @@
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:layout_centerVertical="true"
-        android:layout_marginBottom="65dp"
+        android:layout_marginBottom="125dp"
         android:text="Take Picture"
+        android:textAllCaps="false"
+        android:textSize="21sp"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/buttonPickPic"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_centerVertical="true"
+        android:layout_marginBottom="65dp"
+        android:text="Pick a Picture"
         android:textAllCaps="false"
         android:textSize="21sp"
         android:textStyle="bold" />

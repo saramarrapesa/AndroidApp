@@ -13,20 +13,31 @@ import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
 import android.graphics.Bitmap;
 import android.media.ThumbnailUtils;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.provider.MediaStore;
+import android.text.TextUtils;
+import android.util.Log;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.tensorflow.lite.DataType;
 import org.tensorflow.lite.Interpreter;
+
+import org.tensorflow.lite.support.common.FileUtil;
+import org.tensorflow.lite.support.common.TensorProcessor;
 import org.tensorflow.lite.support.common.ops.NormalizeOp;
 import org.tensorflow.lite.support.image.ImageProcessor;
 import org.tensorflow.lite.support.image.TensorImage;
 import org.tensorflow.lite.support.image.ops.ResizeOp;
+import org.tensorflow.lite.support.label.TensorLabel;
+import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,17 +46,19 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.List;
 
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final int IMAGE_SIZE = 224 ;
     TextView caption;
     ImageView imageView;
     Button picture;
     Button analyze;
+    Button btnPickImage;
     int imageSize = 224;
 
     //name of the model stored in Asset
@@ -53,9 +66,15 @@ public class MainActivity extends AppCompatActivity {
     //Instantiate the Interpreter
     private Interpreter tflite;
     private ByteBuffer inputImageBuffer;
+    private TensorBuffer inputWordsBuffer;
     private static  final String WORD_MAP = "WORD_MAP.txt";
     private final int VOCAB_SIZE = 5000;
+
     private Map<Integer, String> indexToWordMap;
+    private ImageProcessor imageProcessor;
+
+    private TensorImage tensorImage;
+    ActivityResultLauncher<Intent> resultLauncher;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,7 +85,9 @@ public class MainActivity extends AppCompatActivity {
         imageView = findViewById(R.id.imageView);
         picture = findViewById(R.id.button);
         analyze = findViewById(R.id.buttonAnalyze);
+        btnPickImage = findViewById(R.id.buttonPickPic);
 
+        //create the interpreter
         try {
             tflite = new Interpreter(loadModelFile());
         } catch (IOException e) {
@@ -76,10 +97,27 @@ public class MainActivity extends AppCompatActivity {
         // Carica la mappatura tra indici e parole dal file di testo
         indexToWordMap = loadIndexToWordMap(WORD_MAP);
 
+        // Inizializza l'ImageProcessor
+        imageProcessor = new ImageProcessor.Builder()
+                .add(new ResizeOp(7, 7, ResizeOp.ResizeMethod.BILINEAR))
+                .add(new NormalizeOp(0f, 255f))
+                .build();
+
+        // Inizializza il TensorImage con tipo FLOAT32
+        tensorImage = new TensorImage(DataType.FLOAT32);
+
         // Inizializza il buffer di input per l'immagine
         //l' input è un tensor [1 , 7 , 7 , 576] quindi devo creare un image buffer di quelle dimensioni
-        inputImageBuffer = ByteBuffer.allocateDirect(4 * 7 * 7 * 576);
+        inputImageBuffer = ByteBuffer.allocateDirect(  4 * 7 * 7 * 576 );
         inputImageBuffer.order(ByteOrder.nativeOrder());
+
+
+        registerResult();
+
+        //button per selezionare l'immagine da galleria
+        btnPickImage.setOnClickListener(view -> {
+            pickImage();
+        });
 
         picture.setOnClickListener(view -> {
             // Launch camera if we have permission
@@ -91,6 +129,30 @@ public class MainActivity extends AppCompatActivity {
                 requestPermissions(new String[]{Manifest.permission.CAMERA}, 100);
             }
         });
+    }
+
+    //metodo per selezionare l'immagine
+    private void pickImage(){
+        Intent intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+        resultLauncher.launch(intent);
+    }
+
+    //metodo che mostra l'immagine selezionata
+    private void registerResult(){
+        resultLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                new ActivityResultCallback<ActivityResult>() {
+                    @Override
+                    public void onActivityResult(ActivityResult result) {
+                        try {
+                            Uri imageUri = result.getData().getData();
+                            imageView.setImageURI(imageUri);
+                        } catch (Exception e){
+                            Toast.makeText(MainActivity.this, "No image selected" , Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                }
+        );
     }
 
     // Carica il file del modello TensorFlow Lite dal tuo asset
@@ -127,38 +189,52 @@ public class MainActivity extends AppCompatActivity {
     // Esegui inferenza sull'immagine
     private String runInference(Bitmap bitmap) {
         // Preprocessa l'immagine e carica i dati nel buffer di input
-        preprocessImage(bitmap);
+        inputImageBuffer = preprocessImage(bitmap);
 
         // Effettua l'inferenza
-        float[][][] outputScores = new float[1][1][VOCAB_SIZE]; // qui è il problema
-        tflite.run(inputImageBuffer, outputScores);
+        float[][][] outputScores = new float[1][1][VOCAB_SIZE];
+
+        //il mio modello ha 2 input e un output , di conseguenza devo sfruttare questa API
+        Object[] inputs = {inputImageBuffer,inputWordsBuffer};
+        HashMap<Integer, Object> outputs = new HashMap<>();
+        outputs.put(0,outputScores);
+        tflite.runForMultipleInputsOutputs(inputs,outputs);
 
         // Post-processa i risultati e genera la caption
         String caption = postprocessResults(outputScores);
 
+        closeInterpreter();
+
         return caption;
     }
 
-    // Preprocessa l'immagine e carica i dati nel buffer di input
-    private void preprocessImage(Bitmap bitmap) {
-        ImageProcessor imageProcessor =
-                new ImageProcessor.Builder()
-                        .add(new ResizeOp(224, 224, ResizeOp.ResizeMethod.BILINEAR))
-                        .add(new NormalizeOp(0f,255f))
-                        .build();
+    private ByteBuffer  preprocessImage(Bitmap bitmap) {
+        if (inputImageBuffer == null) {
+            throw new IllegalStateException("Il buffer di input non è stato inizializzato correttamente.");
+        }
 
-    // Create a TensorImage object. This creates the tensor of the corresponding
-    // tensor type (uint8 in this case) that the TensorFlow Lite interpreter needs.
-        TensorImage tensorImage = new TensorImage(DataType.FLOAT32);
-
-    // Analysis code for every frame
-    // Preprocess the image
+        // Carica l'immagine nel TensorImage
         tensorImage.load(bitmap);
+
+        // Esegui la pre-elaborazione con l'ImageProcessor
         tensorImage = imageProcessor.process(tensorImage);
+
+        // Estrai i dati normalizzati dal TensorImage e caricali nel buffer di input
+        ByteBuffer floatBuffer = tensorImage.getBuffer();
+        floatBuffer.rewind();
+        inputImageBuffer.rewind();
+        while (floatBuffer.hasRemaining()) {
+            inputImageBuffer.putFloat(floatBuffer.getFloat());
+        }
+
+        return inputImageBuffer;
     }
+
+
 
     // Post-processa i risultati e genera la caption
     private String postprocessResults(float[][][] outputScores) {
+
         // Sostituisci con la tua logica di post-elaborazione
         // Esempio: restituisci la parola corrispondente al punteggio massimo
         int maxIndex = 0;
@@ -169,6 +245,7 @@ public class MainActivity extends AppCompatActivity {
         }
         return "Caption generata: " + getIndexToWord(maxIndex); // Sostituisci con la tua mappatura
     }
+
 
     // Mappa l'indice al termine corrispondente nel tuo vocabolario
     private String getIndexToWord(int index) {
@@ -188,6 +265,10 @@ public class MainActivity extends AppCompatActivity {
     private void updateUIWithCaption(String caption) {
         TextView captionTextView = findViewById(R.id.result);
         captionTextView.setText(caption);
+    }
+
+    private void closeInterpreter(){
+        tflite.close();
     }
 
     private final ActivityResultLauncher<Intent> someActivityResultLauncher = registerForActivityResult(
